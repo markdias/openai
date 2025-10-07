@@ -27,8 +27,45 @@ class SlackPostError(RuntimeError):
     """Raised when posting a message to Slack fails."""
 
 
+def _ensure_bot_token(token: str) -> None:
+    """Ensure the provided Slack token looks like a bot token.
+
+    Slack's Web API distinguishes between bot tokens (``xoxb-``) and other token
+    types such as app-level (``xapp-``) or user tokens (``xoxp-``). Only bot
+    tokens are permitted to call ``chat.postMessage`` in the context of this
+    tool. When the wrong token type is supplied the API responds with the
+    ``not_allowed_token_type`` error, which can be confusing to interpret.
+
+    Args:
+        token: The Slack token string to validate.
+
+    Raises:
+        SlackPostError: If the token does not resemble a bot token.
+    """
+
+    if token.startswith("xoxb-"):
+        return
+
+    if token.startswith("xapp-"):
+        raise SlackPostError(
+            "Slack app-level tokens (starting with 'xapp-') cannot be used for chat.postMessage. "
+            "Create a bot token and supply it via --slack-token or SLACK_BOT_TOKEN."
+        )
+
+    if token.startswith("xoxp-"):
+        raise SlackPostError(
+            "User tokens (starting with 'xoxp-') are not supported. Provide a bot token that begins with 'xoxb-'."
+        )
+
+    raise SlackPostError(
+        "Slack token must be a bot token beginning with 'xoxb-'."
+    )
+
+
 def send_slack_message(message: str, *, token: str, channel: str) -> None:
     """Send a message to a Slack channel via the chat.postMessage API."""
+
+    _ensure_bot_token(token)
 
     response = requests.post(
         "https://slack.com/api/chat.postMessage",
