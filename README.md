@@ -36,6 +36,20 @@ python footballer_app.py "How is Bukayo Saka performing this season?" --model gp
 
 The tool prints the model's response directly to standard output.
 
+### Career-history tables
+
+If you simply pass a player's name (for example `"Sophia Smith"`), the tool will
+automatically request their club and international career history formatted as a
+chronological Markdown table. You can explicitly control this behaviour:
+
+```bash
+# Force the table output regardless of the query phrasing
+python footballer_app.py "Lionel Messi scouting report" --career-table
+
+# Opt out of the automatic table when you just want narrative analysis
+python footballer_app.py "Ada Hegerberg" --no-career-table
+```
+
 ## Sending results to Slack (#general in markdias workspace)
 
 You can optionally forward the generated scouting report to your Slack workspace.

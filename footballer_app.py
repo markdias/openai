@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import Optional
 
@@ -92,7 +93,13 @@ def send_slack_message(message: str, *, token: str, channel: str) -> None:
         raise SlackPostError(f"Slack API error: {error}")
 
 
-def fetch_footballer_info(query: str, *, model: str = "gpt-4.1-mini", temperature: float = 0.3) -> str:
+def fetch_footballer_info(
+    query: str,
+    *,
+    model: str = "gpt-4.1-mini",
+    temperature: float = 0.3,
+    career_table: bool = False,
+) -> str:
     """Fetch information about a footballer using the OpenAI Responses API.
 
     Args:
@@ -108,12 +115,23 @@ def fetch_footballer_info(query: str, *, model: str = "gpt-4.1-mini", temperatur
     """
 
     client = OpenAI()
+    user_message = query
+    if career_table:
+        user_message = (
+            f"{query}\n\n"
+            "Return the player's professional career history as a chronological "
+            "Markdown table. Include club and national-team stints with columns for "
+            "Years, Team, Competition/League, Appearances, Goals, and Notes. Use "
+            "'N/A' when figures are unavailable and add any important context below "
+            "the table."
+        )
+
     response = client.responses.create(
         model=model,
         temperature=temperature,
         input=[
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": query},
+            {"role": "user", "content": user_message},
         ],
     )
     return response.output_text.strip()
@@ -134,6 +152,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Sampling temperature (default: %(default)s).",
     )
     parser.add_argument(
+        "--career-table",
+        dest="career_table",
+        action="store_true",
+        default=None,
+        help="Force the response to be formatted as a career history table.",
+    )
+    parser.add_argument(
+        "--no-career-table",
+        dest="career_table",
+        action="store_false",
+        help="Disable the automatic career history table formatting.",
+    )
+    parser.add_argument(
         "--slack-channel",
         help="Slack channel (e.g., #general) to post the response to.",
     )
@@ -144,15 +175,49 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_NAME_CHARS = re.compile(r"^[A-Za-z .'-]+$")
+
+
+def _looks_like_player_name(text: str) -> bool:
+    """Heuristically determine whether the query is just a player's name."""
+
+    stripped = text.strip()
+    if not stripped:
+        return False
+
+    # Quickly discard anything that looks like a question or command.
+    if any(punct in stripped for punct in "?!"):
+        return False
+
+    if not _NAME_CHARS.match(stripped):
+        return False
+
+    tokens = stripped.split()
+    if len(tokens) > 6:
+        return False
+
+    # Avoid common prompt starters that would otherwise match the regex.
+    lower_first = tokens[0].lower()
+    if lower_first in {"tell", "show", "give", "provide"}:
+        return False
+
+    return True
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    career_table = args.career_table
+    if career_table is None:
+        career_table = _looks_like_player_name(args.query)
 
     try:
         response = fetch_footballer_info(
             args.query,
             model=args.model,
             temperature=args.temperature,
+            career_table=career_table,
         )
     except OpenAIError as exc:  # pragma: no cover - depends on external service
         parser.error(f"OpenAI API request failed: {exc}")
