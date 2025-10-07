@@ -7,7 +7,6 @@ also be executed directly from the command line.
 from __future__ import annotations
 
 import argparse
-import imghdr
 import os
 import re
 import sys
@@ -217,6 +216,27 @@ def _fetch_wikipedia_summary(title: str) -> Optional[dict]:
     return data
 
 
+_IMAGE_SIGNATURES = {
+    b"\xFF\xD8\xFF": "JPEG",
+    b"\x89PNG\r\n\x1a\n": "PNG",
+    b"GIF87a": "GIF",
+    b"GIF89a": "GIF",
+}
+
+
+def _detect_image_type(data: bytes) -> Optional[str]:
+    """Return a best-effort guess of the image type based on the signature."""
+
+    for signature, image_type in _IMAGE_SIGNATURES.items():
+        if data.startswith(signature):
+            return image_type
+
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "WEBP"
+
+    return None
+
+
 def _download_image(url: str) -> Optional[tuple[bytes, str]]:
     """Download an image and return its bytes and image type for PDF embedding."""
 
@@ -241,9 +261,9 @@ def _download_image(url: str) -> Optional[tuple[bytes, str]]:
             image_type = "GIF"
 
     if image_type is None:
-        detected = imghdr.what(None, h=data)
+        detected = _detect_image_type(data)
         if detected:
-            image_type = detected.upper()
+            image_type = detected
 
     if image_type is None:
         return None
