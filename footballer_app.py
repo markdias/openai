@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import textwrap
+import unicodedata
 import urllib.parse
 import zlib
 from dataclasses import dataclass
@@ -431,7 +432,8 @@ class _PDFBuilder:
             if self.current_y - line_height < self.margin:
                 self.add_page()
                 page = self._ensure_page()
-            escaped_line = _escape_pdf_text(line)
+            normalised_line = _normalise_pdf_text(line)
+            escaped_line = _escape_pdf_text(normalised_line)
             operation = (
                 f"BT /{font_key} {font_size:.2f} Tf {self.margin:.2f} {self.current_y:.2f} Td ({escaped_line}) Tj ET"
             )
@@ -612,6 +614,29 @@ def create_pdf_report(
 
 def _escape_pdf_text(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+_PDF_TEXT_REPLACEMENTS = {
+    ord("\u2013"): "-",  # en dash
+    ord("\u2014"): "-",  # em dash
+    ord("\u2018"): "'",  # left single quote
+    ord("\u2019"): "'",  # right single quote / apostrophe
+    ord("\u201c"): '"',  # left double quote
+    ord("\u201d"): '"',  # right double quote
+    ord("\u2026"): "...",  # ellipsis
+    ord("\u2022"): "-",  # bullet
+}
+
+
+def _normalise_pdf_text(text: str) -> str:
+    """Return text safe to encode using the PDF Latin-1 encoding."""
+
+    normalised = unicodedata.normalize("NFKC", text)
+    translated = normalised.translate(_PDF_TEXT_REPLACEMENTS)
+    # ``ignore`` ensures we drop any remaining unsupported characters rather than
+    # raising during PDF generation. This is preferable to hard failure when the
+    # model returns symbols outside the font's encoding.
+    return translated.encode("latin1", "ignore").decode("latin1")
 
 
 def _convert_image_asset(asset: Optional[ImageAsset]) -> Optional[_PDFImage]:
