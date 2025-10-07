@@ -39,8 +39,9 @@ The tool prints the model's response directly to standard output.
 ## Sending results to Slack (#general in markdias workspace)
 
 You can optionally forward the generated scouting report to your Slack workspace.
-Create a bot token in the **markdias** workspace with the `chat:write`
-permission and export it as an environment variable:
+Create a *bot* token in the **markdias** workspace with the `chat:write`
+permission (its value should begin with `xoxb-`) and export it as an
+environment variable:
 
 ```bash
 export SLACK_BOT_TOKEN="xoxb-your-token"
