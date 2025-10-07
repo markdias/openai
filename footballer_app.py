@@ -7,9 +7,11 @@ also be executed directly from the command line.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Optional
 
+import requests
 from openai import OpenAI, OpenAIError
 
 
@@ -19,6 +21,38 @@ _SYSTEM_PROMPT = (
     "and notable achievements. Mention sources when relevant and clarify "
     "uncertainties."
 )
+
+
+class SlackPostError(RuntimeError):
+    """Raised when posting a message to Slack fails."""
+
+
+def send_slack_message(message: str, *, token: str, channel: str) -> None:
+    """Send a message to a Slack channel via the chat.postMessage API."""
+
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={"channel": channel, "text": message},
+        timeout=10,
+    )
+
+    if response.status_code != 200:
+        raise SlackPostError(
+            f"Slack API returned HTTP {response.status_code}: {response.text.strip()}"
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:  # pragma: no cover - defensive branch
+        raise SlackPostError("Slack API returned invalid JSON response") from exc
+
+    if not payload.get("ok", False):
+        error = payload.get("error", "unknown_error")
+        raise SlackPostError(f"Slack API error: {error}")
 
 
 def fetch_footballer_info(query: str, *, model: str = "gpt-4.1-mini", temperature: float = 0.3) -> str:
@@ -62,6 +96,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.3,
         help="Sampling temperature (default: %(default)s).",
     )
+    parser.add_argument(
+        "--slack-channel",
+        help="Slack channel (e.g., #general) to post the response to.",
+    )
+    parser.add_argument(
+        "--slack-token",
+        help="Slack bot token. If omitted, the SLACK_BOT_TOKEN environment variable is used.",
+    )
     return parser
 
 
@@ -80,6 +122,25 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     print(response)
+
+    if args.slack_channel:
+        slack_token = args.slack_token or os.getenv("SLACK_BOT_TOKEN")
+        if not slack_token:
+            parser.error(
+                "--slack-channel requires a token provided via --slack-token or the SLACK_BOT_TOKEN environment variable."
+            )
+            return 2
+
+        try:
+            send_slack_message(
+                response,
+                token=slack_token,
+                channel=args.slack_channel,
+            )
+        except SlackPostError as exc:
+            parser.error(f"Failed to send Slack message: {exc}")
+            return 2
+
     return 0
 
 
