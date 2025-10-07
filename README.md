@@ -35,3 +35,24 @@ python footballer_app.py "How is Bukayo Saka performing this season?" --model gp
 ```
 
 The tool prints the model's response directly to standard output.
+
+## Sending results to Slack (#general in markdias workspace)
+
+You can optionally forward the generated scouting report to your Slack workspace.
+Create a bot token in the **markdias** workspace with the `chat:write`
+permission and export it as an environment variable:
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-your-token"
+```
+
+When you run the CLI, supply the target channel (for example `#general`) and the
+tool will post the message after printing it locally:
+
+```bash
+python footballer_app.py "Update me on Trinity Rodman's recent performances" \
+  --slack-channel "#general"
+```
+
+Alternatively, you can provide the token inline with `--slack-token` if you do
+not want to rely on an environment variable.
