@@ -8,7 +8,7 @@ statistics for players you're interested in.
 ## Getting started
 
 1. Create and activate a virtual environment (optional but recommended).
-2. Install dependencies:
+2. Install dependencies (which include [pandas](https://pandas.pydata.org/) for clean table rendering):
 
    ```bash
    pip install -r requirements.txt
@@ -34,7 +34,9 @@ Optional flags let you customize the model and sampling temperature:
 python footballer_app.py "How is Bukayo Saka performing this season?" --model gpt-4.1 --temperature 0.4
 ```
 
-The tool prints the model's response directly to standard output.
+The tool prints the model's response directly to standard output. When a
+career-history table is present, it is re-rendered with pandas so the columns
+line up neatly in your terminal.
 
 ### Career-history tables
 

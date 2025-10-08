@@ -7,6 +7,7 @@ also be executed directly from the command line.
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import re
 import sys
@@ -16,10 +17,21 @@ import urllib.parse
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, TYPE_CHECKING
 
 import requests
 from openai import OpenAI, OpenAIError
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
+else:  # pragma: no cover - runtime fallback when pandas isn't available
+    DataFrame = object  # type: ignore[assignment]
+
+_PANDAS_SPEC = importlib.util.find_spec("pandas")
+if _PANDAS_SPEC is not None:  # pragma: no cover - exercised when pandas is installed
+    pd = importlib.import_module("pandas")
+else:  # pragma: no cover - executed if pandas is missing
+    pd = None
 
 
 @dataclass
@@ -302,32 +314,121 @@ def fetch_entity_image(label: str, *, search_hint: Optional[str] = None) -> Opti
     return ImageAsset(label=label, data=data, image_type=image_type)
 
 
+_ALIGNMENT_CELL_RE = re.compile(r"^:?-{2,}:?$")
+
+
+def _split_markdown_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_alignment_row(cells: list[str]) -> bool:
+    cleaned = [cell.strip() for cell in cells]
+    if not cleaned:
+        return False
+    return all(_ALIGNMENT_CELL_RE.match(cell) for cell in cleaned if cell)
+
+
+def _find_first_markdown_table(markdown: str) -> Optional[tuple[list[str], int, int]]:
+    lines = markdown.splitlines()
+    start: Optional[int] = None
+    table_lines: list[str] = []
+
+    for index, raw_line in enumerate(lines):
+        if raw_line.strip().startswith("|"):
+            if start is None:
+                start = index
+            table_lines.append(raw_line)
+        elif start is not None:
+            end = index
+            break
+    else:
+        if start is None:
+            return None
+        end = len(lines)
+
+    if start is None or len(table_lines) < 2:
+        return None
+
+    return table_lines, start, end
+
+
+def _format_markdown_table_lines(lines: list[str]) -> Optional[DataFrame]:
+    if pd is None:
+        return None
+
+    rows = []
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or not stripped.startswith("|"):
+            continue
+        rows.append(_split_markdown_row(stripped))
+
+    if len(rows) < 2:
+        return None
+
+    header = rows[0]
+    data_rows: list[list[str]] = []
+
+    for row in rows[1:]:
+        if _is_alignment_row(row):
+            continue
+        if len(row) < len(header):
+            row = row + [""] * (len(header) - len(row))
+        elif len(row) > len(header):
+            row = row[: len(header)]
+        data_rows.append(row)
+
+    if not data_rows:
+        return None
+
+    return pd.DataFrame(data_rows, columns=header)
+
+
+def _render_markdown_with_formatted_table(markdown: str) -> str:
+    if pd is None:
+        return markdown
+
+    table_info = _find_first_markdown_table(markdown)
+    if not table_info:
+        return markdown
+
+    lines, start, end = table_info
+    dataframe = _format_markdown_table_lines(lines)
+    if dataframe is None:
+        return markdown
+
+    ascii_table = dataframe.to_string(index=False)
+    ascii_lines = ascii_table.splitlines()
+
+    response_lines = markdown.splitlines()
+    formatted_lines = response_lines[:start] + ascii_lines + response_lines[end:]
+    return "\n".join(formatted_lines)
+
+
 def extract_club_names(markdown: str) -> list[str]:
     """Extract club names from the first Markdown table in a response."""
 
+    table_info = _find_first_markdown_table(markdown)
+    if not table_info:
+        return []
+
+    lines, _, _ = table_info
     clubs: list[str] = []
     seen: set[str] = set()
     header_seen = False
 
-    for raw_line in markdown.splitlines():
-        line = raw_line.strip()
-        if not line:
-            if header_seen:
-                break
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or not stripped.startswith("|"):
             continue
 
-        if not line.startswith("|"):
-            if header_seen:
-                break
-            continue
-
-        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        cells = _split_markdown_row(stripped)
         if not header_seen:
             if any(cell.lower() == "team" for cell in cells):
                 header_seen = True
             continue
 
-        if not cells or all(set(cell) == {"-"} for cell in cells):
+        if _is_alignment_row(cells):
             continue
 
         lowered_cells = [cell.lower() for cell in cells]
@@ -1006,7 +1107,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error(f"OpenAI API request failed: {exc}")
         return 2
 
-    print(response)
+    display_response = _render_markdown_with_formatted_table(response)
+    print(display_response)
 
     if generate_pdf and pdf_path:
         player_label = args.query.strip()
@@ -1046,7 +1148,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         try:
             send_slack_message(
-                response,
+                display_response,
                 token=slack_token,
                 channel=args.slack_channel,
             )
