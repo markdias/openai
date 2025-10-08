@@ -36,6 +36,16 @@ Optional flags let you customize the model and sampling temperature:
 python footballer_app.py "How is Bukayo Saka performing this season?" --model gpt-4.1 --temperature 0.4
 ```
 
+### Interactive question menu
+
+If you're not sure what to ask, you can launch an interactive menu of sample
+queries. The tool will list several ready-made scouting prompts and send the
+selected one to the API:
+
+```bash
+python footballer_app.py --menu
+```
+
 The tool prints the model's response directly to standard output. When a
 career-history table is present, it is re-rendered with pandas so the columns
 line up neatly in your terminal.
