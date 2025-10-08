@@ -17,7 +17,7 @@ import urllib.parse
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional, TYPE_CHECKING
+from typing import Callable, Dict, Iterable, Optional, Sequence, TYPE_CHECKING
 
 import requests
 from openai import OpenAI, OpenAIError
@@ -53,8 +53,21 @@ _SYSTEM_PROMPT = (
 )
 
 
+_DEFAULT_MENU_QUESTIONS: Sequence[str] = (
+    "Provide a detailed scouting report on Alexia Putellas, including recent club performances.",
+    "Summarise the key milestones in Lionel Messi's international career with Argentina.",
+    "How has Bukayo Saka contributed to Arsenal's attack over the past two seasons?",
+    "Describe Trinity Rodman's playing style and notable achievements in the NWSL.",
+    "Which trophies has Sam Kerr won with club and country, and how has she influenced those runs?",
+)
+
+
 class SlackPostError(RuntimeError):
     """Raised when posting a message to Slack fails."""
+
+
+class MenuSelectionCancelled(RuntimeError):
+    """Raised when the interactive question menu is cancelled."""
 
 
 def _ensure_bot_token(token: str) -> None:
@@ -1007,9 +1020,50 @@ def _paeth_predictor(a: int, b: int, c: int) -> int:
         return b
     return c
 
+
+def _select_question_from_menu(
+    questions: Sequence[str],
+    *,
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> str:
+    """Prompt the user to choose a question from a numbered menu."""
+
+    if not questions:
+        raise ValueError("At least one question must be provided to display the menu.")
+
+    print_fn("Select a question to ask about a footballer:")
+    for index, question in enumerate(questions, start=1):
+        print_fn(f"{index}. {question}")
+
+    prompt = "Enter the number of your chosen question (or 'q' to cancel): "
+    while True:
+        try:
+            selection = input_fn(prompt)
+        except EOFError as exc:  # pragma: no cover - defensive for non-interactive stdin
+            raise MenuSelectionCancelled("Input stream closed during menu selection.") from exc
+
+        choice = selection.strip()
+        if not choice:
+            print_fn("Please enter a number from the list above.")
+            continue
+
+        lowered = choice.lower()
+        if lowered in {"q", "quit", "exit"}:
+            raise MenuSelectionCancelled("User opted to cancel the menu selection.")
+
+        if choice.isdigit():
+            index = int(choice)
+            if 1 <= index <= len(questions):
+                return questions[index - 1]
+
+        print_fn(
+            f"'{choice}' is not a valid selection. Enter a number between 1 and {len(questions)} or 'q' to cancel."
+        )
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Query OpenAI for footballer information.")
-    parser.add_argument("query", help="Question or topic about a footballer to research.")
+    parser.add_argument("query", nargs="?", help="Question or topic about a footballer to research.")
     parser.add_argument(
         "--model",
         default="gpt-4.1-mini",
@@ -1051,6 +1105,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--slack-token",
         help="Slack bot token. If omitted, the SLACK_BOT_TOKEN environment variable is used.",
     )
+    parser.add_argument(
+        "--menu",
+        action="store_true",
+        help="Show a menu of sample questions to choose from instead of typing a query.",
+    )
     return parser
 
 
@@ -1086,6 +1145,17 @@ def _looks_like_player_name(text: str) -> bool:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.menu:
+        try:
+            args.query = _select_question_from_menu(_DEFAULT_MENU_QUESTIONS)
+        except MenuSelectionCancelled as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+    if not args.query:
+        parser.error("You must provide a query or select one via --menu.")
+        return 2
 
     pdf_path = args.pdf_path
     generate_pdf = args.pdf or bool(pdf_path)
