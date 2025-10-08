@@ -3,7 +3,9 @@
 This repository contains a small Python command-line tool that sends your
 queries about footballers (soccer players) to OpenAI's GPT models. It is useful
 for gathering quick scouting reports, background information, and notable
-statistics for players you're interested in.
+statistics for players you're interested in. Responses now wrap up with two
+follow-up questions about the subject and highlight a teammate who has played
+with them.
 
 ## Getting started
 
